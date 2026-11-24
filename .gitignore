@@ -1,5 +1,22 @@
+# Credenciais e configurações privadas
+/config/credenciais.php
+.env
+.env.*
+!.env.example
+
+# Arquivos temporários
+*.log
+*.tmp
+*.bak
+
+# Arquivos compactados
+*.zip
+
+# IDEs e editores
+.vscode/
+.idea/
+
+# Sistema operacional
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/
-config/conexao.local.php
+Desktop.ini
