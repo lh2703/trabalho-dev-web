@@ -1,0 +1,5 @@
+RewriteEngine On
+
+# Redirecionamento permanente de HTTP para HTTPS
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://garagemdigital.rf.gd%{REQUEST_URI} [R=301,L]
