@@ -1,76 +1,80 @@
 <?php
-require_once "config/conexao.php";
 
-session_start();
+require_once __DIR__ . "/includes/funcoes.php";
+require_once __DIR__ . "/includes/formularios.php";
+require_once __DIR__ . "/config/conexao.php";
 
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
 
-$mensagem = "";
-$tipoAlerta = "success";
+// IDENTIFICAR REGISTROS SELECIONADOS
 
-$veiculoId = (int)($_GET['veiculo_id'] ?? 0);
-$manutencaoId = (int)($_GET['id'] ?? 0);
+$veiculoId = idValido($_GET["veiculo_id"] ?? 0);
 
-$categorias = [
-    "Revisão",
-    "Freios",
-    "Suspensão",
-    "Motor",
-    "Upgrade",
-    "Outros"
-];
+$manutencaoId = idValido($_GET["id"] ?? 0);
 
-function h($valor) {
-    return htmlspecialchars(
-        (string)$valor,
-        ENT_QUOTES,
-        'UTF-8'
-    );
-}
+
+// PROCESSAR ATUALIZAÇÕES
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $acao = $_POST["acao"] ?? "";
+    $destino = "atualizar.php";
 
     try {
 
-        if (!hash_equals(
-            $_SESSION['csrf_token'],
-            $_POST['csrf_token'] ?? ''
-        )) {
-            throw new RuntimeException("Requisição inválida.");
+        validarCsrf();
+
+        $acao = $_POST["acao"] ?? "";
+
+        $id = idValido($_POST["id"] ?? 0);
+
+        if (!$id) {
+            throw new RuntimeException(
+                "Identificador de registro inválido."
+            );
         }
+
 
         // ATUALIZAR VEÍCULO
 
         if ($acao === "editar_veiculo") {
 
-            $veiculoId = (int)($_POST["id"] ?? 0);
-            $modelo = trim($_POST["modelo"] ?? "");
-            $ano = (int)($_POST["ano"] ?? 0);
-            $placa = strtoupper(trim($_POST["placa"] ?? ""));
-            $km_atual = (int)($_POST["km_atual"] ?? -1);
+            $destino = "atualizar.php?veiculo_id=" . $id;
 
-            if (
-                $veiculoId <= 0 ||
-                $modelo === "" ||
-                $placa === "" ||
-                $ano < 1900 ||
-                $ano > (int)date("Y") + 1 ||
-                $km_atual < 0 ||
-                strlen($placa) > 10 ||
-                mb_strlen($modelo) > 100
-            ) {
+            $dados = dadosVeiculo($_POST);
+
+            $pdo->beginTransaction();
+
+            bloquearVeiculo($pdo, $id);
+
+
+            // VERIFICAR QUILOMETRAGEM DO HISTÓRICO
+
+            $stmt = $pdo->prepare("
+                SELECT COALESCE(MAX(km_servico), 0)
+                FROM manutencoes
+                WHERE veiculo_id = ?
+            ");
+
+            $stmt->execute([$id]);
+
+            $maiorKm = (int)$stmt->fetchColumn();
+
+            if ($dados["km_atual"] < $maiorKm) {
+
                 throw new RuntimeException(
-                    "Preencha corretamente os dados do veículo."
+                    "A quilometragem atual não pode ser inferior "
+                    . "à maior quilometragem registrada no histórico: "
+                    . quilometragem($maiorKm) . "."
                 );
+
             }
+
+
+            // SALVAR ALTERAÇÕES DO VEÍCULO
 
             $stmt = $pdo->prepare("
                 UPDATE veiculos
-                SET modelo = ?,
+                SET
+                    modelo = ?,
                     ano = ?,
                     placa = ?,
                     km_atual = ?
@@ -78,84 +82,113 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             ");
 
             $stmt->execute([
-                $modelo,
-                $ano,
-                $placa,
-                $km_atual,
-                $veiculoId
+                $dados["modelo"],
+                $dados["ano"],
+                $dados["placa"],
+                $dados["km_atual"],
+                $id
             ]);
 
-            $mensagem = "Veículo atualizado com sucesso!";
+            $alterado = $stmt->rowCount() > 0;
+
+            $pdo->commit();
+
+            if ($alterado) {
+
+                definirMensagem(
+                    "Veículo atualizado com sucesso!",
+                    "success"
+                );
+
+            } else {
+
+                definirMensagem(
+                    "Nenhuma alteração foi realizada.",
+                    "info"
+                );
+
+            }
+
         }
+
 
         // ATUALIZAR MANUTENÇÃO
 
         elseif ($acao === "editar_manutencao") {
 
-            $manutencaoId = (int)($_POST["id"] ?? 0);
-            $veiculo_id = (int)($_POST["veiculo_id"] ?? 0);
+            $destino = "atualizar.php?id=" . $id;
 
-            $servico = trim($_POST["servico"] ?? "");
-            $categoria = trim($_POST["categoria"] ?? "");
-            $data = $_POST["data"] ?? "";
+            $dados = dadosManutencao($_POST);
 
-            $km_servico = (int)($_POST["km_servico"] ?? -1);
-            $proxima_km = (int)($_POST["proxima_km"] ?? -1);
+            $registro = buscarManutencao($pdo, $id);
 
-            $valor = filter_var(
-                $_POST["valor"] ?? "",
-                FILTER_VALIDATE_FLOAT
-            );
+            if (!$registro) {
 
-            $observacao = trim($_POST["observacao"] ?? "");
-
-            $dataObj = DateTime::createFromFormat('!Y-m-d', $data);
-
-            if (
-                $manutencaoId <= 0 ||
-                $veiculo_id <= 0 ||
-                $servico === "" ||
-                mb_strlen($servico) > 120 ||
-                !$dataObj ||
-                $dataObj->format('Y-m-d') !== $data ||
-                !in_array($categoria, $categorias, true) ||
-                $km_servico < 0 ||
-                $proxima_km < 0 ||
-                $valor === false ||
-                $valor < 0 ||
-                $valor > 99999999.99
-            ) {
                 throw new RuntimeException(
-                    "Preencha corretamente os dados da manutenção."
+                    "Manutenção não encontrada."
                 );
-            }
 
-            if ($proxima_km > 0 && $proxima_km <= $km_servico) {
-                throw new RuntimeException(
-                    "A próxima revisão deve possuir quilometragem superior à do serviço."
-                );
             }
 
             $pdo->beginTransaction();
 
+
+            // BLOQUEAR OS VEÍCULOS ENVOLVIDOS
+
+            $ids = array_unique([
+                (int)$registro["veiculo_id"],
+                $dados["veiculo_id"]
+            ]);
+
+            sort($ids, SORT_NUMERIC);
+
+            foreach ($ids as $vid) {
+
+                bloquearVeiculo($pdo, (int)$vid);
+
+            }
+
+
+            // VERIFICAR SE A MANUTENÇÃO AINDA EXISTE
+
             $stmt = $pdo->prepare("
-                SELECT id
+                SELECT id, veiculo_id
                 FROM manutencoes
                 WHERE id = ?
                 FOR UPDATE
             ");
 
-            $stmt->execute([$manutencaoId]);
+            $stmt->execute([$id]);
 
-            if (!$stmt->fetch()) {
+            $registroAtual = $stmt->fetch();
+
+            if (!$registroAtual) {
+
                 throw new RuntimeException(
-                    "Manutenção não encontrada."
+                    "A manutenção não existe mais."
                 );
+
             }
+
+            if (
+                (int)$registroAtual["veiculo_id"]
+                !== (int)$registro["veiculo_id"]
+            ) {
+
+                throw new RuntimeException(
+                    "O registro foi alterado por outra operação. "
+                    . "Atualize a página e tente novamente."
+                );
+
+            }
+
+
+            // SALVAR ALTERAÇÕES DA MANUTENÇÃO
 
             $stmt = $pdo->prepare("
                 UPDATE manutencoes
-                SET veiculo_id = ?,
+                SET
+                    veiculo_id = ?,
                     servico = ?,
                     categoria = ?,
                     data = ?,
@@ -167,75 +200,115 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             ");
 
             $stmt->execute([
-                $veiculo_id,
-                $servico,
-                $categoria,
-                $data,
-                $km_servico,
-                $proxima_km,
-                $valor,
-                $observacao,
-                $manutencaoId
+                $dados["veiculo_id"],
+                $dados["servico"],
+                $dados["categoria"],
+                $dados["data"],
+                $dados["km_servico"],
+                $dados["proxima_km"],
+                $dados["valor"],
+                $dados["observacao"],
+                $id
             ]);
 
-            // Atualiza a quilometragem somente se for maior.
+            $alterado = $stmt->rowCount() > 0;
 
-            $stmt = $pdo->prepare("
-                UPDATE veiculos
-                SET km_atual = GREATEST(km_atual, ?)
-                WHERE id = ?
-            ");
 
-            $stmt->execute([
-                $km_servico,
-                $veiculo_id
-            ]);
+            // ATUALIZAR QUILOMETRAGEM DO VEÍCULO
+
+            atualizarQuilometragem(
+                $pdo,
+                $dados["veiculo_id"],
+                $dados["km_servico"]
+            );
 
             $pdo->commit();
 
-            $mensagem = "Manutenção atualizada com sucesso!";
+            if ($alterado) {
+
+                definirMensagem(
+                    "Manutenção atualizada com sucesso!",
+                    "success"
+                );
+
+            } else {
+
+                definirMensagem(
+                    "Nenhuma alteração foi realizada nos dados da manutenção.",
+                    "info"
+                );
+
+            }
+
         }
+
+
+        // OPERAÇÃO INVÁLIDA
 
         else {
-            throw new RuntimeException("Operação inválida.");
+
+            throw new RuntimeException(
+                "Operação inválida."
+            );
+
         }
 
-    } catch (PDOException $e) {
-
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        $tipoAlerta = "danger";
-
-        if ($e->getCode() === "23000") {
-            $mensagem = "Dados duplicados ou relacionamento inválido.";
-        } else {
-            $mensagem = "Não foi possível atualizar o registro.";
-        }
-
-        error_log($e->getMessage());
-
-    } catch (RuntimeException $e) {
-
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        $tipoAlerta = "danger";
-        $mensagem = $e->getMessage();
     }
+
+
+    // TRATAR ERROS DO BANCO DE DADOS
+
+    catch (PDOException $e) {
+
+        if ($pdo->inTransaction()) {
+
+            $pdo->rollBack();
+
+        }
+
+        tratarErroBanco(
+            $e,
+            "Não foi possível atualizar o registro."
+        );
+
+    }
+
+
+    // TRATAR ERROS DE VALIDAÇÃO
+
+    catch (RuntimeException $e) {
+
+        if ($pdo->inTransaction()) {
+
+            $pdo->rollBack();
+
+        }
+
+        definirMensagem(
+            $e->getMessage(),
+            "warning"
+        );
+
+    }
+
+
+    // EVITAR REENVIO DO FORMULÁRIO
+
+    redirecionar($destino);
+
 }
 
-// CONSULTAR VEÍCULOS
+
+// CONSULTAR VEÍCULOS CADASTRADOS
 
 $veiculos = $pdo->query("
     SELECT *
     FROM veiculos
-    ORDER BY modelo
+    ORDER BY modelo, id
 ")->fetchAll();
 
-// CONSULTAR MANUTENÇÕES
+
+// CONSULTAR MANUTENÇÕES CADASTRADAS
 
 $manutencoes = $pdo->query("
     SELECT
@@ -246,131 +319,166 @@ $manutencoes = $pdo->query("
         v.placa
     FROM manutencoes m
     INNER JOIN veiculos v
-        ON m.veiculo_id = v.id
+        ON v.id = m.veiculo_id
     ORDER BY m.data DESC, m.id DESC
 ")->fetchAll();
 
-$veiculo = null;
-$manutencao = null;
 
 // BUSCAR VEÍCULO SELECIONADO
 
-if ($veiculoId > 0) {
+$veiculo = $veiculoId
+    ? buscarVeiculo($pdo, $veiculoId)
+    : null;
 
-    $stmt = $pdo->prepare("
-        SELECT *
-        FROM veiculos
-        WHERE id = ?
-    ");
-
-    $stmt->execute([$veiculoId]);
-    $veiculo = $stmt->fetch();
-
-    if (!$veiculo) {
-        $tipoAlerta = "warning";
-        $mensagem = "Veículo não encontrado.";
-    }
-}
 
 // BUSCAR MANUTENÇÃO SELECIONADA
 
-if ($manutencaoId > 0) {
+$manutencao = $manutencaoId
+    ? buscarManutencao($pdo, $manutencaoId)
+    : null;
 
-    $stmt = $pdo->prepare("
-        SELECT *
-        FROM manutencoes
-        WHERE id = ?
-    ");
 
-    $stmt->execute([$manutencaoId]);
-    $manutencao = $stmt->fetch();
+// CARREGAR CABEÇALHO
 
-    if (!$manutencao) {
-        $tipoAlerta = "warning";
-        $mensagem = "Manutenção não encontrada.";
-    }
-}
+require_once __DIR__ . "/includes/header.php";
 
-require_once "includes/header.php";
 ?>
 
-<div class="mb-4">
-    <h2 class="fw-bold">Atualização de Registros</h2>
 
-    <p class="text-muted">
-        Altere as informações dos veículos e serviços cadastrados.
+<!-- CABEÇALHO DA PÁGINA -->
+
+<div class="mb-4">
+
+    <h2 class="fw-bold mb-1">
+
+        Atualização de Registros
+
+    </h2>
+
+    <p class="text-muted mb-0">
+
+        Edite as informações dos veículos e das manutenções
+        cadastradas na sua garagem.
+
     </p>
+
 </div>
 
-<?php if ($mensagem !== ""): ?>
 
-    <div class="alert alert-<?= h($tipoAlerta) ?> alert-dismissible fade show">
+<!-- MENSAGENS DO SISTEMA -->
 
-        <?= h($mensagem) ?>
+<?php exibirMensagem(); ?>
 
-        <button
-            type="button"
-            class="btn-close"
-            data-bs-dismiss="alert">
-        </button>
+
+<!-- REGISTRO NÃO ENCONTRADO -->
+
+<?php if (
+    ($veiculoId && !$veiculo) ||
+    ($manutencaoId && !$manutencao)
+): ?>
+
+    <div class="alert alert-warning">
+
+        O registro solicitado não foi encontrado
+        ou já foi excluído.
 
     </div>
 
 <?php endif; ?>
 
-<!-- SELEÇÃO DOS REGISTROS -->
+
+<!-- SELEÇÃO DE REGISTROS -->
 
 <div class="row g-4 mb-4">
+
+
+    <!-- SELECIONAR VEÍCULO -->
 
     <div class="col-lg-6">
 
         <div class="card shadow-sm h-100">
 
-            <div class="card-header bg-dark text-white fw-bold">
+            <div class="card-header bg-dark text-white fw-bold py-3">
+
                 Selecionar Veículo
+
             </div>
 
-            <div class="card-body">
+            <div class="card-body p-4">
 
-                <form method="GET">
+                <p class="small text-muted">
 
-                    <label class="form-label">
-                        Veículo
-                    </label>
+                    Altere o modelo, ano, placa ou
+                    quilometragem atual de um veículo.
 
-                    <select
-                        name="veiculo_id"
-                        class="form-select mb-3"
-                        required>
+                </p>
 
-                        <option value="">
-                            Selecione um veículo...
-                        </option>
+                <?php if (empty($veiculos)): ?>
 
-                        <?php foreach ($veiculos as $v): ?>
+                    <div class="alert alert-light border mb-0">
 
-                            <option
-                                value="<?= (int)$v['id'] ?>"
-                                <?= $veiculoId === (int)$v['id'] ? 'selected' : '' ?>>
+                        Nenhum veículo cadastrado.
 
-                                <?= h($v['modelo']) ?>
-                                - <?= h($v['placa']) ?>
+                        <a href="cadastro.php">
+
+                            Cadastrar veículo
+
+                        </a>
+
+                    </div>
+
+                <?php else: ?>
+
+                    <form method="GET" action="atualizar.php">
+
+                        <label
+                            for="selecionarVeiculo"
+                            class="form-label">
+
+                            Veículo
+
+                        </label>
+
+                        <select
+                            name="veiculo_id"
+                            id="selecionarVeiculo"
+                            class="form-select mb-3"
+                            required>
+
+                            <option value="">
+
+                                Selecione um veículo...
 
                             </option>
 
-                        <?php endforeach; ?>
+                            <?php foreach ($veiculos as $v): ?>
 
-                    </select>
+                                <option
+                                    value="<?= (int)$v["id"] ?>"
+                                    <?= $veiculoId === (int)$v["id"]
+                                        ? "selected"
+                                        : "" ?>>
 
-                    <button
-                        type="submit"
-                        class="btn btn-primary w-100">
+                                    <?= h($v["modelo"]) ?>
+                                    (<?= h($v["placa"]) ?>)
 
-                        Editar Veículo
+                                </option>
 
-                    </button>
+                            <?php endforeach; ?>
 
-                </form>
+                        </select>
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary w-100">
+
+                            Editar Veículo
+
+                        </button>
+
+                    </form>
+
+                <?php endif; ?>
 
             </div>
 
@@ -378,56 +486,96 @@ require_once "includes/header.php";
 
     </div>
 
+
+    <!-- SELECIONAR MANUTENÇÃO -->
+
     <div class="col-lg-6">
 
         <div class="card shadow-sm h-100">
 
-            <div class="card-header bg-dark text-white fw-bold">
+            <div class="card-header bg-dark text-white fw-bold py-3">
+
                 Selecionar Manutenção
+
             </div>
 
-            <div class="card-body">
+            <div class="card-body p-4">
 
-                <form method="GET">
+                <p class="small text-muted">
 
-                    <label class="form-label">
-                        Manutenção
-                    </label>
+                    Altere as informações de um serviço
+                    registrado no histórico.
 
-                    <select
-                        name="id"
-                        class="form-select mb-3"
-                        required>
+                </p>
 
-                        <option value="">
-                            Selecione uma manutenção...
-                        </option>
+                <?php if (empty($manutencoes)): ?>
 
-                        <?php foreach ($manutencoes as $m): ?>
+                    <div class="alert alert-light border mb-0">
 
-                            <option
-                                value="<?= (int)$m['id'] ?>"
-                                <?= $manutencaoId === (int)$m['id'] ? 'selected' : '' ?>>
+                        Nenhuma manutenção cadastrada.
 
-                                <?= h($m['modelo']) ?>
-                                - <?= h($m['servico']) ?>
-                                (<?= date('d/m/Y', strtotime($m['data'])) ?>)
+                        <a href="cadastro.php">
+
+                            Registrar manutenção
+
+                        </a>
+
+                    </div>
+
+                <?php else: ?>
+
+                    <form method="GET" action="atualizar.php">
+
+                        <label
+                            for="selecionarManutencao"
+                            class="form-label">
+
+                            Manutenção
+
+                        </label>
+
+                        <select
+                            name="id"
+                            id="selecionarManutencao"
+                            class="form-select mb-3"
+                            required>
+
+                            <option value="">
+
+                                Selecione uma manutenção...
 
                             </option>
 
-                        <?php endforeach; ?>
+                            <?php foreach ($manutencoes as $m): ?>
 
-                    </select>
+                                <option
+                                    value="<?= (int)$m["id"] ?>"
+                                    <?= $manutencaoId === (int)$m["id"]
+                                        ? "selected"
+                                        : "" ?>>
 
-                    <button
-                        type="submit"
-                        class="btn btn-primary w-100">
+                                    <?= h($m["modelo"]) ?>
+                                    (<?= h($m["placa"]) ?>)
+                                    - <?= h($m["servico"]) ?>
+                                    - <?= dataBrasileira($m["data"]) ?>
 
-                        Editar Manutenção
+                                </option>
 
-                    </button>
+                            <?php endforeach; ?>
 
-                </form>
+                        </select>
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary w-100">
+
+                            Editar Manutenção
+
+                        </button>
+
+                    </form>
+
+                <?php endif; ?>
 
             </div>
 
@@ -437,24 +585,49 @@ require_once "includes/header.php";
 
 </div>
 
-<!-- FORMULÁRIO DE EDIÇÃO DE VEÍCULO -->
+
+<!-- FORMULÁRIO DE EDIÇÃO DO VEÍCULO -->
 
 <?php if ($veiculo): ?>
 
     <div class="card shadow-sm mb-4">
 
-        <div class="card-header bg-primary text-white fw-bold">
-            Editar Veículo
+        <div class="card-header bg-primary text-white py-3">
+
+            <h6 class="fw-bold mb-0">
+
+                Editar Veículo
+
+            </h6>
+
         </div>
 
         <div class="card-body p-4">
 
+            <div class="border-bottom pb-3 mb-4">
+
+                <h5 class="fw-bold mb-1">
+
+                    <?= h($veiculo["modelo"]) ?>
+
+                </h5>
+
+                <div class="small text-muted">
+
+                    Placa: <?= h($veiculo["placa"]) ?>
+
+                    |
+
+                    Quilometragem atual:
+                    <?= quilometragem($veiculo["km_atual"]) ?>
+
+                </div>
+
+            </div>
+
             <form method="POST" action="atualizar.php">
 
-                <input
-                    type="hidden"
-                    name="csrf_token"
-                    value="<?= h($_SESSION['csrf_token']) ?>">
+                <?= campoCsrf() ?>
 
                 <input
                     type="hidden"
@@ -464,79 +637,51 @@ require_once "includes/header.php";
                 <input
                     type="hidden"
                     name="id"
-                    value="<?= (int)$veiculo['id'] ?>">
+                    value="<?= (int)$veiculo["id"] ?>">
 
-                <div class="row g-3">
 
-                    <div class="col-md-6">
+                <!-- CAMPOS DO VEÍCULO -->
 
-                        <label class="form-label">Modelo</label>
+                <?php camposVeiculo($veiculo); ?>
 
-                        <input
-                            type="text"
-                            name="modelo"
-                            class="form-control"
-                            maxlength="100"
-                            value="<?= h($veiculo['modelo']) ?>"
-                            required>
 
-                    </div>
+                <!-- INFORMAÇÃO SOBRE QUILOMETRAGEM -->
 
-                    <div class="col-md-2">
+                <div class="alert alert-light border small mt-4">
 
-                        <label class="form-label">Ano</label>
-
-                        <input
-                            type="number"
-                            name="ano"
-                            class="form-control"
-                            min="1900"
-                            max="<?= date('Y') + 1 ?>"
-                            value="<?= (int)$veiculo['ano'] ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-md-4">
-
-                        <label class="form-label">Placa</label>
-
-                        <input
-                            type="text"
-                            name="placa"
-                            class="form-control"
-                            maxlength="10"
-                            value="<?= h($veiculo['placa']) ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-md-6">
-
-                        <label class="form-label">
-                            Quilometragem Atual
-                        </label>
-
-                        <input
-                            type="number"
-                            name="km_atual"
-                            class="form-control"
-                            min="0"
-                            value="<?= (int)$veiculo['km_atual'] ?>"
-                            required>
-
-                    </div>
+                    A quilometragem atual não pode ser inferior
+                    à maior quilometragem registrada no histórico
+                    de manutenções deste veículo.
 
                 </div>
 
-                <div class="d-flex gap-2 mt-4">
 
-                    <button type="submit" class="btn btn-success">
+                <!-- BOTÕES -->
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+
+                    <button
+                        type="submit"
+                        class="btn btn-success">
+
                         Salvar Alterações
+
                     </button>
 
-                    <a href="index.php" class="btn btn-secondary">
-                        Voltar
+                    <a
+                        href="atualizar.php"
+                        class="btn btn-outline-secondary">
+
+                        Cancelar
+
+                    </a>
+
+                    <a
+                        href="index.php"
+                        class="btn btn-outline-primary">
+
+                        Voltar à Home
+
                     </a>
 
                 </div>
@@ -549,24 +694,50 @@ require_once "includes/header.php";
 
 <?php endif; ?>
 
-<!-- FORMULÁRIO DE EDIÇÃO DE MANUTENÇÃO -->
+
+<!-- FORMULÁRIO DE EDIÇÃO DA MANUTENÇÃO -->
 
 <?php if ($manutencao): ?>
 
     <div class="card shadow-sm mb-4">
 
-        <div class="card-header bg-primary text-white fw-bold">
-            Editar Manutenção
+        <div class="card-header bg-primary text-white py-3">
+
+            <h6 class="fw-bold mb-0">
+
+                Editar Manutenção
+
+            </h6>
+
         </div>
 
         <div class="card-body p-4">
 
+            <div class="border-bottom pb-3 mb-4">
+
+                <h5 class="fw-bold mb-1">
+
+                    <?= h($manutencao["servico"]) ?>
+
+                </h5>
+
+                <div class="small text-muted">
+
+                    Data do serviço:
+                    <?= dataBrasileira($manutencao["data"]) ?>
+
+                    |
+
+                    Valor registrado:
+                    <?= moeda($manutencao["valor"]) ?>
+
+                </div>
+
+            </div>
+
             <form method="POST" action="atualizar.php">
 
-                <input
-                    type="hidden"
-                    name="csrf_token"
-                    value="<?= h($_SESSION['csrf_token']) ?>">
+                <?= campoCsrf() ?>
 
                 <input
                     type="hidden"
@@ -576,160 +747,54 @@ require_once "includes/header.php";
                 <input
                     type="hidden"
                     name="id"
-                    value="<?= (int)$manutencao['id'] ?>">
+                    value="<?= (int)$manutencao["id"] ?>">
 
-                <div class="row g-3">
 
-                    <div class="col-md-6">
+                <!-- CAMPOS DA MANUTENÇÃO -->
 
-                        <label class="form-label">Veículo</label>
+                <?php camposManutencao(
+                    $veiculos,
+                    $manutencao
+                ); ?>
 
-                        <select
-                            name="veiculo_id"
-                            class="form-select"
-                            required>
 
-                            <?php foreach ($veiculos as $v): ?>
+                <!-- INFORMAÇÃO SOBRE QUILOMETRAGEM -->
 
-                                <option
-                                    value="<?= (int)$v['id'] ?>"
-                                    <?= (int)$manutencao['veiculo_id'] === (int)$v['id'] ? 'selected' : '' ?>>
+                <div class="alert alert-light border small mt-4">
 
-                                    <?= h($v['modelo']) ?>
-                                    - <?= h($v['placa']) ?>
-
-                                </option>
-
-                            <?php endforeach; ?>
-
-                        </select>
-
-                    </div>
-
-                    <div class="col-md-6">
-
-                        <label class="form-label">Serviço / Peça</label>
-
-                        <input
-                            type="text"
-                            name="servico"
-                            class="form-control"
-                            maxlength="120"
-                            value="<?= h($manutencao['servico']) ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-md-6">
-
-                        <label class="form-label">Categoria</label>
-
-                        <select
-                            name="categoria"
-                            class="form-select"
-                            required>
-
-                            <?php foreach ($categorias as $categoria): ?>
-
-                                <option
-                                    value="<?= h($categoria) ?>"
-                                    <?= $manutencao['categoria'] === $categoria ? 'selected' : '' ?>>
-
-                                    <?= h($categoria) ?>
-
-                                </option>
-
-                            <?php endforeach; ?>
-
-                        </select>
-
-                    </div>
-
-                    <div class="col-md-6">
-
-                        <label class="form-label">Data do Serviço</label>
-
-                        <input
-                            type="date"
-                            name="data"
-                            class="form-control"
-                            value="<?= h($manutencao['data']) ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-md-4">
-
-                        <label class="form-label">
-                            KM no Serviço
-                        </label>
-
-                        <input
-                            type="number"
-                            name="km_servico"
-                            class="form-control"
-                            min="0"
-                            value="<?= (int)$manutencao['km_servico'] ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-md-4">
-
-                        <label class="form-label">
-                            Próxima Revisão (KM)
-                        </label>
-
-                        <input
-                            type="number"
-                            name="proxima_km"
-                            class="form-control"
-                            min="0"
-                            value="<?= (int)$manutencao['proxima_km'] ?>"
-                            required>
-
-                        <small class="text-muted">
-                            Informe 0 caso não exista previsão.
-                        </small>
-
-                    </div>
-
-                    <div class="col-md-4">
-
-                        <label class="form-label">Valor (R$)</label>
-
-                        <input
-                            type="number"
-                            name="valor"
-                            class="form-control"
-                            min="0"
-                            step="0.01"
-                            value="<?= h($manutencao['valor']) ?>"
-                            required>
-
-                    </div>
-
-                    <div class="col-12">
-
-                        <label class="form-label">Observações</label>
-
-                        <textarea
-                            name="observacao"
-                            class="form-control"
-                            rows="4"><?= h($manutencao['observacao']) ?></textarea>
-
-                    </div>
+                    Caso a quilometragem informada no serviço
+                    seja superior à quilometragem atual do veículo,
+                    o sistema atualizará esse valor automaticamente.
 
                 </div>
 
-                <div class="d-flex gap-2 mt-4">
 
-                    <button type="submit" class="btn btn-success">
+                <!-- BOTÕES -->
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+
+                    <button
+                        type="submit"
+                        class="btn btn-success">
+
                         Salvar Alterações
+
                     </button>
 
-                    <a href="consulta.php" class="btn btn-secondary">
-                        Voltar
+                    <a
+                        href="atualizar.php"
+                        class="btn btn-outline-secondary">
+
+                        Cancelar
+
+                    </a>
+
+                    <a
+                        href="consulta.php"
+                        class="btn btn-outline-primary">
+
+                        Voltar à Consulta
+
                     </a>
 
                 </div>
@@ -742,4 +807,35 @@ require_once "includes/header.php";
 
 <?php endif; ?>
 
-<?php require_once "includes/footer.php"; ?>
+
+<!-- ORIENTAÇÃO INICIAL -->
+
+<?php if (!$veiculo && !$manutencao): ?>
+
+    <div class="card shadow-sm">
+
+        <div class="card-body text-center py-5">
+
+            <h5 class="fw-bold mb-2">
+
+                Selecione um registro para editar
+
+            </h5>
+
+            <p class="text-muted mb-0">
+
+                Utilize os campos acima para escolher
+                um veículo ou uma manutenção.
+
+            </p>
+
+        </div>
+
+    </div>
+
+<?php endif; ?>
+
+
+<!-- RODAPÉ -->
+
+<?php require_once __DIR__ . "/includes/footer.php"; ?>

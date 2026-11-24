@@ -3,7 +3,13 @@
 require_once __DIR__ . "/includes/funcoes.php";
 require_once __DIR__ . "/config/conexao.php";
 
+
+// IDENTIFICAR FILTRO DE VEÍCULO
+
 $veiculoFiltro = idValido($_GET["veiculo_id"] ?? 0);
+
+
+// CONSULTAR MANUTENÇÕES
 
 $sql = "
     SELECT
@@ -34,37 +40,56 @@ $stmt->execute($params);
 
 $manutencoes = $stmt->fetchAll();
 
+
+// LISTAR VEÍCULOS
+
 $veiculos = $pdo->query("
     SELECT id, modelo, placa
     FROM veiculos
     ORDER BY modelo, id
 ")->fetchAll();
 
+
+// CALCULAR TOTAL INICIAL
+
 $totalInicial = array_sum(
     array_column($manutencoes, "valor")
 );
+
 
 require_once __DIR__ . "/includes/header.php";
 
 ?>
 
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+<!-- CABEÇALHO DA PÁGINA -->
 
-    <h2 class="fw-bold mb-0">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
 
-        Consulta de Manutenções
+    <div>
 
-    </h2>
+        <h2 class="fw-bold mb-1">
 
-    <div class="bg-white px-3 py-2 rounded shadow-sm">
+            Consulta de Manutenções
 
-        <span class="text-muted">
+        </h2>
 
-            Total exibido:
+        <p class="text-muted mb-0">
 
-        </span>
+            Consulte e acompanhe o histórico de serviços dos seus veículos.
 
-        <strong class="text-success fs-5" id="totalFiltrado">
+        </p>
+
+    </div>
+
+    <div class="bg-white px-4 py-3 rounded shadow-sm">
+
+        <div class="small text-muted">
+
+            Total exibido
+
+        </div>
+
+        <strong class="text-success fs-4" id="totalFiltrado">
 
             <?= moeda($totalInicial) ?>
 
@@ -74,11 +99,16 @@ require_once __DIR__ . "/includes/header.php";
 
 </div>
 
+
+<!-- FILTROS -->
+
 <div class="card shadow-sm mb-4">
 
     <div class="card-body">
 
         <div class="row g-3">
+
+            <!-- FILTRO POR VEÍCULO -->
 
             <div class="col-md-4">
 
@@ -121,7 +151,9 @@ require_once __DIR__ . "/includes/header.php";
 
                     <noscript>
 
-                        <button class="btn btn-primary mt-2">
+                        <button
+                            type="submit"
+                            class="btn btn-primary mt-2">
 
                             Filtrar
 
@@ -132,6 +164,9 @@ require_once __DIR__ . "/includes/header.php";
                 </form>
 
             </div>
+
+
+            <!-- FILTRO POR CATEGORIA -->
 
             <div class="col-md-4">
 
@@ -165,6 +200,9 @@ require_once __DIR__ . "/includes/header.php";
 
             </div>
 
+
+            <!-- PESQUISA TEXTUAL -->
+
             <div class="col-md-4">
 
                 <label for="filtroTexto" class="form-label">
@@ -183,6 +221,9 @@ require_once __DIR__ . "/includes/header.php";
 
         </div>
 
+
+        <!-- CONTADOR E LIMPEZA DOS FILTROS -->
+
         <div class="d-flex justify-content-between align-items-center mt-3">
 
             <small class="text-muted" id="quantidadeFiltrada">
@@ -191,7 +232,9 @@ require_once __DIR__ . "/includes/header.php";
 
             </small>
 
-            <a href="consulta.php" class="btn btn-sm btn-outline-secondary">
+            <a
+                href="consulta.php"
+                class="btn btn-sm btn-outline-secondary">
 
                 Limpar filtros
 
@@ -203,11 +246,18 @@ require_once __DIR__ . "/includes/header.php";
 
 </div>
 
+
+<!-- HISTÓRICO DE MANUTENÇÕES -->
+
 <div class="card shadow-sm">
 
-    <div class="card-header bg-white fw-bold">
+    <div class="card-header bg-white py-3">
 
-        Histórico de Manutenções
+        <h6 class="fw-bold mb-0">
+
+            Histórico de Manutenções
+
+        </h6>
 
     </div>
 
@@ -220,15 +270,25 @@ require_once __DIR__ . "/includes/header.php";
             <thead>
 
                 <tr>
-                    <th>Veículo</th>
-                    <th>Serviço</th>
-                    <th>Categoria</th>
-                    <th>Data</th>
-                    <th>KM Serviço</th>
-                    <th>Próxima Revisão</th>
-                    <th>Status</th>
-                    <th>Valor</th>
-                    <th>Ações</th>
+
+                    <th scope="col">Veículo</th>
+
+                    <th scope="col">Serviço</th>
+
+                    <th scope="col">Categoria</th>
+
+                    <th scope="col">Data</th>
+
+                    <th scope="col">KM Serviço</th>
+
+                    <th scope="col">Próxima Revisão</th>
+
+                    <th scope="col">Status</th>
+
+                    <th scope="col">Valor</th>
+
+                    <th scope="col">Ações</th>
+
                 </tr>
 
             </thead>
@@ -244,43 +304,52 @@ require_once __DIR__ . "/includes/header.php";
                         (int)$m["proxima_km"]
                     );
 
+                    $observacao = trim(
+                        (string)($m["observacao"] ?? "")
+                    );
+
                     ?>
 
                     <tr
                         data-valor="<?= h($m["valor"]) ?>"
                         data-categoria="<?= h($m["categoria"]) ?>">
 
-                        <td>
 
-                            <strong>
+                        <!-- VEÍCULO -->
 
+                        <td class="veiculo-coluna">
+
+                            <div class="veiculo-titulo">
                                 <?= h($m["modelo"]) ?>
+                            </div>
 
-                            </strong>
-
-                            <div class="small text-muted">
-
+                            <div class="veiculo-placa">
                                 <?= h($m["placa"]) ?>
-
                             </div>
 
                         </td>
 
-                        <td>
 
-                            <?= h($m["servico"]) ?>
+                        <!-- SERVIÇO E OBSERVAÇÃO -->
 
-                            <?php if (!empty($m["observacao"])): ?>
+                        <td class="servico-coluna">
 
-                                <div class="small text-muted observacao">
+                            <div class="servico-titulo">
+                                <?= h($m["servico"]) ?>
+                            </div>
 
-                                    <?= h($m["observacao"]) ?>
+                            <?php if ($observacao !== ""): ?>
 
+                                <div class="observacao">
+                                    <?= h($observacao) ?>
                                 </div>
 
                             <?php endif; ?>
 
                         </td>
+
+
+                        <!-- CATEGORIA -->
 
                         <td>
 
@@ -292,27 +361,49 @@ require_once __DIR__ . "/includes/header.php";
 
                         </td>
 
-                        <td>
+
+                        <!-- DATA -->
+
+                        <td class="data-coluna">
 
                             <?= dataBrasileira($m["data"]) ?>
 
                         </td>
 
-                        <td>
+
+                        <!-- QUILOMETRAGEM DO SERVIÇO -->
+
+                        <td class="km-coluna">
 
                             <?= quilometragem($m["km_servico"]) ?>
 
                         </td>
 
-                        <td>
 
-                            <?= (int)$m["proxima_km"] > 0
-                                ? quilometragem($m["proxima_km"])
-                                : "-" ?>
+                        <!-- PRÓXIMA REVISÃO -->
+
+                        <td class="km-coluna">
+
+                            <?php if ((int)$m["proxima_km"] > 0): ?>
+
+                                <?= quilometragem($m["proxima_km"]) ?>
+
+                            <?php else: ?>
+
+                                <span class="text-muted">
+
+                                    -
+
+                                </span>
+
+                            <?php endif; ?>
 
                         </td>
 
-                        <td>
+
+                        <!-- STATUS -->
+
+                        <td class="status-coluna">
 
                             <span class="badge bg-<?= h($status["classe"]) ?>">
 
@@ -322,11 +413,17 @@ require_once __DIR__ . "/includes/header.php";
 
                         </td>
 
-                        <td>
+
+                        <!-- VALOR -->
+
+                        <td class="valor-coluna">
 
                             <?= moeda($m["valor"]) ?>
 
                         </td>
+
+
+                        <!-- AÇÕES -->
 
                         <td>
 
@@ -356,13 +453,36 @@ require_once __DIR__ . "/includes/header.php";
 
                 <?php endforeach; ?>
 
+
+                <!-- MENSAGEM SEM RESULTADOS -->
+
                 <tr
                     id="semResultados"
                     <?= !empty($manutencoes) ? "hidden" : "" ?>>
 
-                    <td colspan="9" class="text-center text-muted py-4">
+                    <td
+                        colspan="9"
+                        class="text-center text-muted py-5">
 
-                        Nenhuma manutenção encontrada.
+                        <div class="fw-semibold mb-1">
+
+                            Nenhuma manutenção encontrada.
+
+                        </div>
+
+                        <div class="small">
+
+                            Verifique os filtros ou cadastre um novo serviço.
+
+                        </div>
+
+                        <a
+                            href="cadastro.php"
+                            class="btn btn-sm btn-outline-primary mt-3">
+
+                            Registrar manutenção
+
+                        </a>
 
                     </td>
 
@@ -376,12 +496,100 @@ require_once __DIR__ . "/includes/header.php";
 
 </div>
 
-<div class="small text-muted mt-3">
 
-    Os indicadores de revisão são calculados individualmente
-    para cada registro, considerando a quilometragem atual
-    do veículo.
+<!-- LEGENDA DOS STATUS -->
+
+<div class="card shadow-sm mt-4">
+
+    <div class="card-body">
+
+        <h6 class="fw-bold mb-3">
+
+            Indicadores de revisão
+
+        </h6>
+
+        <div class="row g-3">
+
+            <div class="col-sm-6 col-lg-3">
+
+                <span class="badge bg-success mb-2">
+
+                    Em dia
+
+                </span>
+
+                <div class="small text-muted">
+
+                    Mais de 1.500 km restantes.
+
+                </div>
+
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+
+                <span class="badge bg-warning text-dark mb-2">
+
+                    Atenção
+
+                </span>
+
+                <div class="small text-muted">
+
+                    Até 1.500 km restantes.
+
+                </div>
+
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+
+                <span class="badge bg-danger mb-2">
+
+                    Vencida
+
+                </span>
+
+                <div class="small text-muted">
+
+                    Quilometragem prevista atingida ou ultrapassada.
+
+                </div>
+
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+
+                <span class="badge bg-secondary mb-2">
+
+                    Sem prazo
+
+                </span>
+
+                <div class="small text-muted">
+
+                    Sem previsão de próxima revisão.
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <hr>
+
+        <div class="small text-muted">
+
+            Os indicadores são calculados individualmente para
+            cada manutenção, considerando a quilometragem atual
+            do veículo.
+
+        </div>
+
+    </div>
 
 </div>
+
 
 <?php require_once __DIR__ . "/includes/footer.php"; ?>

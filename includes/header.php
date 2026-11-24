@@ -68,23 +68,95 @@ $tituloPagina = $menu[$paginaAtual] ?? "Garagem Digital";
             border-radius: 12px 12px 0 0 !important;
         }
 
+        .table {
+            margin-bottom: 0;
+        }
+
         .table th {
             white-space: nowrap;
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 12px 10px;
         }
 
         .table td {
             vertical-align: middle;
+            padding: 14px 10px;
+            font-size: 0.875rem;
+        }
+
+        .table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        .veiculo-coluna {
+            min-width: 155px;
+        }
+
+        .veiculo-titulo {
+            font-weight: 600;
+            line-height: 1.4;
+            color: #212529;
+        }
+
+        .veiculo-placa {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+
+        .servico-coluna {
+            min-width: 230px;
+            max-width: 320px;
+            text-align: left;
+        }
+
+        .servico-titulo {
+            font-size: 0.875rem;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #212529;
+            overflow-wrap: anywhere;
+        }
+
+        .observacao {
+            font-size: 0.78rem;
+            color: #6c757d;
+            line-height: 1.5;
+            margin-top: 5px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            text-align: left;
+        }
+
+        .valor-coluna {
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
+        .data-coluna,
+        .km-coluna,
+        .status-coluna {
+            white-space: nowrap;
         }
 
         .acoes {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
+            align-items: center;
+            gap: 6px;
         }
 
-        .observacao {
-            overflow-wrap: anywhere;
-            white-space: pre-wrap;
+        #tabelaManutencoes .acoes {
+            flex-wrap: nowrap;
+        }
+
+        .acoes .btn {
+            white-space: nowrap;
         }
 
         .form-label {
@@ -93,6 +165,19 @@ $tituloPagina = $menu[$paginaAtual] ?? "Garagem Digital";
 
         footer {
             margin-top: auto;
+        }
+
+        @media (max-width: 768px) {
+
+            .servico-coluna {
+                min-width: 200px;
+            }
+
+            .table td,
+            .table th {
+                padding: 10px 8px;
+            }
+
         }
 
     </style>
