@@ -1,6 +1,6 @@
 -- ==========================================
 -- GARAGEM DIGITAL
--- Ambiente de desenvolvimento local
+-- Ambiente de produção
 -- ==========================================
 SET NAMES utf8mb4;
 
